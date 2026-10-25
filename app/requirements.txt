@@ -1,0 +1,7 @@
+# Version ranges (not exact pins) so wheels exist for the Python of Ubuntu 22.04 – 26.04.
+fastapi>=0.115,<1.0
+uvicorn>=0.32,<1.0
+argon2-cffi>=23.1,<26
+pyotp>=2.9,<3
+cryptography>=44,<50
+segno>=1.6,<2

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Simple-WireGuard admin CLI (emergency access: password / TOTP reset).
+set -euo pipefail
+if [[ $EUID -ne 0 ]]; then echo "Bitte mit sudo ausführen: sudo swg-admin $*" >&2; exit 1; fi
+cd /var/lib/simple-wireguard
+exec runuser -u swg -- env PYTHONPATH=/opt/simple-wireguard/app PYTHONDONTWRITEBYTECODE=1 \
+  /opt/simple-wireguard/venv/bin/python -m swg.cli "$@"

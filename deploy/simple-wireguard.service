@@ -1,0 +1,43 @@
+[Unit]
+Description=Simple-WireGuard web interface
+After=network-online.target simple-wireguard-agent.service
+Wants=simple-wireguard-agent.service
+
+[Service]
+Type=simple
+User=swg
+Group=swg
+Environment=PYTHONPATH=/opt/simple-wireguard/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/simple-wireguard/venv/bin/uvicorn swg.main:app --host 127.0.0.1 --port __APP_PORT__ --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header --log-level warning
+Restart=on-failure
+RestartSec=3
+UMask=0027
+# --- Hardening: the web app is unprivileged and sandboxed ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+ReadWritePaths=/var/lib/simple-wireguard /var/log/simple-wireguard
+ReadOnlyPaths=/etc/simple-wireguard
+
+[Install]
+WantedBy=multi-user.target
