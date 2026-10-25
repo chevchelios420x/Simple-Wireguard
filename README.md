@@ -2,6 +2,31 @@
 
 WireGuard-Server für Ubuntu mit einer Weboberfläche zum Verwalten von Peers. Dazu kommen Dashboard, Benutzerverwaltung mit Pflicht-TOTP, Pushover-Benachrichtigungen, verschlüsselte Backups und Audit-Log. Die Oberfläche lässt sich als PWA installieren und ist für Smartphones optimiert.
 
+![Dashboard](docs/screenshots/desk-dashboard.png)
+
+<table>
+<tr>
+<td width="33%"><img src="docs/screenshots/iphone-peers.png" alt="Peers auf dem iPhone"></td>
+<td width="33%"><img src="docs/screenshots/iphone-peerform.png" alt="Peer anlegen mit Tooltip (iPhone)"></td>
+<td>
+
+**Mobil (iPhone 15 Pro):** Die Tabellen werden zu Karten, unten gibt es eine Navigationsleiste, Dialoge öffnen als Bottom-Sheet. Tooltips erscheinen per Tap auf <kbd>?</kbd>. Über „Zum Home-Bildschirm“ lässt sich die Seite als PWA installieren.
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary>Weitere Screenshots (Desktop)</summary>
+
+| Peers | Peer anlegen (Tooltip per Hover) |
+|---|---|
+| ![Peers](docs/screenshots/desk-peers.png) | ![Peer-Formular](docs/screenshots/desk-peerform.png) |
+
+![Einstellungen inkl. Pushover](docs/screenshots/desk-settings.png)
+
+</details>
+
 ## Installation
 
 ```bash

@@ -2,6 +2,11 @@
 
 Versionierung: `vX.Y.Z` – X = Major (nur auf Ansage), Y = neues Feature, Z = Bugfix.
 
+## v0.1.1 – 2026-10-25
+
+### Dokumentation
+- Screenshots (Desktop & iPhone 15 Pro) in der README eingebunden (`docs/screenshots/`).
+
 ## v0.1.0 – 2026-10-25
 
 Erstes Release.
