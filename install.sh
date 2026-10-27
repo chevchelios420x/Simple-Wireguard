@@ -17,7 +17,6 @@ ETC=/etc/simple-wireguard
 VAR=/var/lib/simple-wireguard
 LOGDIR=/var/log/simple-wireguard
 MARKER="$ETC/install.json"
-APP_PORT=8088
 
 # ---------- output helpers ----------
 if [[ -t 1 ]]; then R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[34m'; BOLD=$'\e[1m'; N=$'\e[0m'; else R= G= Y= B= BOLD= N=; fi
@@ -231,6 +230,23 @@ pick_gui_port() {
 pick_gui_port
 ok "GUI-Port: $GUI_PORT/tcp"
 
+# Internal app port (127.0.0.1 only). Hosts with many services (e.g. Docker containers in host network
+# mode) may already use 8088 -> take the next free port and remember it for later runs.
+PREV_APP_PORT="$(prev app_port)"
+app_port_busy() {
+  local h; h="$(ss -Htlpn "sport = :$1" 2>/dev/null || true)"
+  [[ -z "$h" ]] && return 1
+  [[ "$1" == "$PREV_APP_PORT" && ( "$h" == *uvicorn* || "$h" == *python* ) ]] && return 1
+  return 0
+}
+APP_PORT=""
+for p in ${PREV_APP_PORT:-} $(seq 8088 8199); do
+  [[ "$p" == "$GUI_PORT" ]] && continue
+  if ! app_port_busy "$p"; then APP_PORT="$p"; break; fi
+done
+[[ -n "$APP_PORT" ]] || die "Kein freier interner Port zwischen 8088 und 8199 gefunden"
+[[ "$APP_PORT" != 8088 && -z "$PREV_APP_PORT" ]] && info "Port 8088 belegt – interne App nutzt 127.0.0.1:$APP_PORT"
+
 WAN_IF="$(ip -4 route show default | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 [[ -n "$WAN_IF" ]] || die "Kein Default-Interface gefunden"
 
@@ -352,7 +368,7 @@ fi
 python3 - "$SJ" <<PY
 import json, sys
 json.dump({"iface": "$IFACE", "listen_port": $PORT, "subnet": "$SUBNET", "server_address": "$SERVER_ADDR",
-           "endpoint": "$ENDPOINT", "dns": "$DNS", "public_key": "$SERVER_PUB", "gui_port": $GUI_PORT,
+           "endpoint": "$ENDPOINT", "dns": "$DNS", "public_key": "$SERVER_PUB", "gui_port": $GUI_PORT, "app_port": $APP_PORT,
            "wan_iface": "$WAN_IF", "mtu": None}, open(sys.argv[1], "w"), indent=2)
 PY
 chown root:swg "$SJ"; chmod 0640 "$SJ"

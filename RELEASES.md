@@ -2,6 +2,13 @@
 
 Versionierung: `vX.Y.Z` – X = Major (nur auf Ansage), Y = neues Feature, Z = Bugfix.
 
+## v0.1.4 – 2026-10-27
+
+### Bugfixes
+- Installer: Der interne App-Port (127.0.0.1:8088) wurde nicht auf Belegung geprüft. Auf Hosts mit vielen
+  Diensten, z. B. Docker-Containern im Host-Netzwerk, konnte die Web-App deshalb nicht starten. Jetzt wird
+  automatisch der nächste freie Port (8088–8199) gewählt und in `server.json` gespeichert.
+
 ## v0.1.3 – 2026-10-27
 
 ### Bugfixes
