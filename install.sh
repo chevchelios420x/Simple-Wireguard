@@ -2,7 +2,10 @@
 # Simple-WireGuard installer – idempotent. Re-run at any time to upgrade or change settings.
 # Usage: sudo bash install.sh [--endpoint HOST] [--port 51820] [--subnet 10.8.0.0/24] [--dns "1.1.1.1, 9.9.9.9"]
 #                             [--iface wg0] [--gui-port 4444] [--admin admin] [--cert FILE --key FILE]
-#                             [--renew-cert] [--no-nat] [--yes]
+#                             [--renew-cert] [--no-nat] [--yes] [--force]
+#
+# SAFE BY DEFAULT: without --force the installer only runs a DRY-RUN. It performs every check, prints
+# the complete plan and changes NOTHING (no packages, no files, no log). Apply with --force.
 #
 # Philosophy: minimal footprint. Only adds what the WireGuard server needs; does NOT touch firewall
 # (ufw/nftables), global sysctl files or existing nginx sites. NAT/forwarding rules live only in the
@@ -28,11 +31,12 @@ die()   { err "$*"; exit 1; }
 hr()    { echo "${BOLD}────────────────────────────────────────────────────────────${N}"; }
 trap 'err "Abbruch in Zeile $LINENO (Befehl: $BASH_COMMAND)"' ERR
 
-ASSUME_YES=0; RENEW_CERT=0; NAT=1
+ASSUME_YES=0; RENEW_CERT=0; NAT=1; DRY_RUN=1
+ORIG_ARGS="$(printf '%q ' "$@")"
 OPT_ENDPOINT= OPT_PORT= OPT_SUBNET= OPT_DNS= OPT_DNS_SET=0 OPT_IFACE= OPT_GUI_PORT= OPT_CERT= OPT_KEY=
 ADMIN_USER=admin
 
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --endpoint) OPT_ENDPOINT="$2"; shift 2 ;;
@@ -47,6 +51,8 @@ while [[ $# -gt 0 ]]; do
     --renew-cert) RENEW_CERT=1; shift ;;
     --no-nat) NAT=0; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
+    --force) DRY_RUN=0; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage ;;
     *) die "Unbekannte Option: $1 (siehe --help)" ;;
   esac
@@ -54,6 +60,7 @@ done
 
 confirm() {
   local q="$1" def="${2:-n}" a
+  if [[ $DRY_RUN -eq 1 ]]; then echo "    ${Y}→ mit --force würde hier gefragt:${N} $q"; return 0; fi
   if [[ $ASSUME_YES -eq 1 ]]; then return 0; fi
   if [[ ! -t 0 ]]; then [[ $def == y ]]; return; fi
   read -r -p "$q [$( [[ $def == y ]] && echo J/n || echo j/N )] " a
@@ -66,19 +73,30 @@ except Exception: print("")' "$1" "$2"; }
 
 # ---------- preflight ----------
 [[ $EUID -eq 0 ]] || die "Bitte mit Root-Rechten ausführen: sudo bash install.sh"
-[[ -r /etc/os-release ]] && . /etc/os-release
-if [[ "${ID:-}" != "ubuntu" ]]; then
-  warn "Getestet für Ubuntu 22.04/24.04/26.04 LTS – erkannt: ${PRETTY_NAME:-unbekannt}"
+# Read os-release in a subshell: sourcing it directly would overwrite our own $VERSION.
+os_field() { ( [[ -r /etc/os-release ]] && . /etc/os-release; eval "echo \"\${$1:-}\"" ); }
+OS_ID="$(os_field ID)"; OS_VERSION_ID="$(os_field VERSION_ID)"; OS_PRETTY="$(os_field PRETTY_NAME)"
+for c in ip ss python3 dpkg; do
+  command -v "$c" >/dev/null 2>&1 || die "Benötigtes Programm '$c' fehlt (Paket: $( [[ $c == ip || $c == ss ]] && echo iproute2 || echo $c ))"
+done
+if [[ "$OS_ID" != "ubuntu" ]]; then
+  warn "Getestet für Ubuntu 22.04/24.04/26.04 LTS – erkannt: ${OS_PRETTY:-unbekannt}"
   confirm "Trotzdem fortfahren?" || exit 1
 else
-  case "${VERSION_ID:-}" in
-    22.04|24.04|26.04) ok "System: $PRETTY_NAME" ;;
-    *) warn "Ubuntu ${VERSION_ID:-?} ist nicht offiziell getestet (22.04/24.04/26.04)."; confirm "Fortfahren?" y || exit 1 ;;
+  case "$OS_VERSION_ID" in
+    22.04|24.04|26.04) ok "System: $OS_PRETTY" ;;
+    *) warn "Ubuntu ${OS_VERSION_ID:-?} ist nicht offiziell getestet (22.04/24.04/26.04)."; confirm "Fortfahren?" y || exit 1 ;;
   esac
 fi
-mkdir -p "$LOGDIR"
-exec > >(tee -a "$LOGDIR/install.log") 2>&1
-echo; hr; echo "${BOLD} Simple-WireGuard Installer v$VERSION$( date '+  (%F %T)')${N}"; hr
+if [[ $DRY_RUN -eq 0 ]]; then
+  mkdir -p "$LOGDIR"
+  exec > >(tee -a "$LOGDIR/install.log") 2>&1
+fi
+echo; hr; echo "${BOLD} Simple-WireGuard Installer v$VERSION$( date '+  (%F %T)')${N}"
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "${Y}${BOLD} DRY-RUN – es wird NICHTS verändert. Ausführen mit: --force${N}"
+fi
+hr
 
 # ---------- detect previous installs ----------
 PREV_VERSION=""
@@ -148,7 +166,13 @@ if [[ -n "${SSH_CONNECTION:-}" ]]; then
     CLIENT_ACTIVE=1
   fi
 fi
-[[ $CLIENT_ACTIVE -eq 1 ]] && warn "Die Installation fügt NAT/Forwarding-Regeln hinzu. Bestehende Client-Tunnel bleiben unangetastet, Routing-Überschneidungen sind aber möglich."
+if [[ $CLIENT_ACTIVE -eq 1 ]]; then
+  if [[ $NAT -eq 1 ]]; then
+    warn "Das neue Interface setzt NAT/Forwarding-Regeln (nur solange es läuft). Bestehende Tunnel bleiben unangetastet, Routing-Überschneidungen sind aber möglich."
+  else
+    warn "Bestehende Tunnel bleiben unangetastet (--no-nat: keine NAT/Forwarding-Regeln)."
+  fi
+fi
 
 if [[ $CONFLICT -eq 1 ]]; then
   free=0; while [[ -e /etc/wireguard/wg$free.conf || " $active_ifaces " == *" wg$free "* ]]; do free=$((free+1)); done
@@ -218,6 +242,9 @@ pick_gui_port() {
     GUI_PORT=9443; info "Weiche auf Fallback-Port 9443 aus"; return
   fi
   [[ -z "$OPT_GUI_PORT" && "$GUI_PORT" != 9443 ]] && warn "Fallback-Port 9443 ist ebenfalls belegt."
+  if [[ $DRY_RUN -eq 1 ]]; then
+    echo "    ${Y}→ mit --force würde hier nach einem freien GUI-Port gefragt${N}"; GUI_PORT="?"; return
+  fi
   [[ -t 0 && $ASSUME_YES -eq 0 ]] || die "Kein freier GUI-Port. Bitte angeben: sudo bash install.sh --gui-port <port>"
   while true; do
     read -r -p "Welchen TCP-Port soll die Weboberfläche nutzen? (leer = Abbruch) " p
@@ -250,14 +277,107 @@ done
 WAN_IF="$(ip -4 route show default | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 [[ -n "$WAN_IF" ]] || die "Kein Default-Interface gefunden"
 
-# ---------- packages ----------
-info "Installiere Pakete …"
-export DEBIAN_FRONTEND=noninteractive
+if [[ -z "$ENDPOINT" ]]; then
+  command -v curl >/dev/null 2>&1 && ENDPOINT="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  [[ -n "$ENDPOINT" ]] || ENDPOINT="$(ip -4 addr show "$WAN_IF" | grep -oP 'inet \K[0-9.]+' | head -1)"
+  info "Endpoint automatisch erkannt: $ENDPOINT (ändern mit --endpoint vpn.example.com)"
+fi
+[[ "$ENDPOINT" =~ ^[A-Za-z0-9.:-]+$ ]] || die "Ungültiger Endpoint: $ENDPOINT"
+
+# ==========================================================================================
+#  PLAN (read-only). Everything above and in this block only inspects the system.
+# ==========================================================================================
 PKGS=(wireguard wireguard-tools nginx python3 python3-venv openssl logrotate curl ca-certificates)
 [[ $NAT -eq 1 ]] && PKGS+=(iptables)
 missing=(); for p in "${PKGS[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
 NGINX_FRESH=0
 [[ " ${missing[*]} " == *" nginx "* ]] && NGINX_FRESH=1
+
+NAT_RULES=""
+if [[ $NAT -eq 1 ]]; then
+  NAT_RULES="PostUp = sysctl -q -w net.ipv4.ip_forward=1
+PostUp = iptables -I FORWARD -i %i -j ACCEPT; iptables -I FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -s $SUBNET -o $WAN_IF -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -s $SUBNET -o $WAN_IF -j MASQUERADE"
+fi
+# Interface header (root only; the web app can never change it). $1 = server private key.
+build_iface_conf() {
+  cat <<EOF
+# Managed by Simple-WireGuard install.sh. Peers are appended by the agent.
+[Interface]
+Address = $SERVER_ADDR/$PREFIX
+ListenPort = $PORT
+PrivateKey = $1
+SaveConfig = false
+$NAT_RULES
+EOF
+}
+if [[ ! -f "$ETC/server.key" || ! -f "$ETC/interface.conf" ]]; then IFACE_PLAN="neu"
+elif [[ "$(cat "$ETC/interface.conf")" != "$(build_iface_conf "$(cat "$ETC/server.key")")" ]]; then IFACE_PLAN="geändert"
+else IFACE_PLAN="unverändert"; fi
+
+REQ_HASH="$(sha256sum "$SCRIPT_DIR/app/requirements.txt" | cut -d' ' -f1)-$(python3 -c 'import sys;print(sys.version_info[:2])' | tr -d ' ')"
+VENV_REBUILD=0
+[[ -x "$ROOT/venv/bin/python" && "$(cat "$ROOT/venv/.req-hash" 2>/dev/null)" == "$REQ_HASH" ]] || VENV_REBUILD=1
+
+CERT="$ETC/tls/cert.pem"; KEY="$ETC/tls/key.pem"
+if [[ -n "$OPT_CERT" || -n "$OPT_KEY" ]]; then
+  [[ -f "$OPT_CERT" && -f "$OPT_KEY" ]] || die "--cert und --key müssen existierende Dateien sein"
+  CERT_PLAN="custom"; CERT_WHY="eigenes Zertifikat übernehmen ($OPT_CERT)"
+elif [[ ! -f "$CERT" || ! -f "$KEY" ]]; then CERT_PLAN="new"; CERT_WHY="Self-Signed neu erzeugen"
+elif [[ $RENEW_CERT -eq 1 ]]; then CERT_PLAN="new"; CERT_WHY="Self-Signed erneuern (--renew-cert)"
+elif [[ "$(cat "$ETC/tls/.source" 2>/dev/null)" == "custom" ]]; then CERT_PLAN="keep"; CERT_WHY="eigenes Zertifikat bleibt"
+elif ! openssl x509 -in "$CERT" -noout -checkend $((30*86400)) >/dev/null 2>&1; then CERT_PLAN="new"; CERT_WHY="läuft in < 30 Tagen ab – erneuern"
+elif ! openssl x509 -in "$CERT" -noout -ext subjectAltName 2>/dev/null | grep -qF "$ENDPOINT"; then CERT_PLAN="new"; CERT_WHY="Endpoint geändert – erneuern"
+else CERT_PLAN="keep"; CERT_WHY="vorhandenes Zertifikat bleibt"; fi
+
+have() { [[ -e "$1" ]] && echo "aktualisieren" || echo "neu"; }
+plan() { printf '  %-22s %s\n' "$1" "$2"; }
+echo; hr; echo "${BOLD} Geplante Änderungen$( [[ $DRY_RUN -eq 1 ]] && echo ' (Dry-Run – wird NICHT ausgeführt)')${N}"; hr
+plan "Pakete (apt)" "$( [[ ${#missing[@]} -gt 0 ]] && echo "installieren: ${missing[*]} (ohne Autostart)" || echo "alle vorhanden – nichts")"
+[[ $NGINX_FRESH -eq 1 ]] && plan "" "nginx ist neu: Standardseite (Port 80) wird deaktiviert"
+plan "Systembenutzer" "$(id swg >/dev/null 2>&1 && echo "swg vorhanden" || echo "swg anlegen (ohne Login-Shell)")"
+plan "Anwendung" "$ROOT ($( [[ -n "$PREV_VERSION" ]] && echo "v$PREV_VERSION → v$VERSION" || echo "neu v$VERSION"))"
+plan "Python-Umgebung" "$( [[ $VENV_REBUILD -eq 1 ]] && echo "$ROOT/venv (neu) erzeugen, pip-Pakete laden" || echo "unverändert")"
+plan "Verzeichnisse" "$ETC, $VAR, $LOGDIR"
+plan "secret.key" "$( [[ -f "$ETC/secret.key" ]] && echo "vorhanden – bleibt" || echo "neu erzeugen")"
+plan "Server-Key" "$( [[ -f "$ETC/server.key" ]] && echo "vorhanden – bleibt" || echo "neu erzeugen")"
+plan "Interface $IFACE" "$IFACE_PLAN: $SERVER_ADDR/$PREFIX, UDP $PORT$( [[ $IFACE_PLAN == geändert ]] && echo " → Interface-Neustart (kurze Unterbrechung)")"
+plan "" "/etc/wireguard/$IFACE.conf ($(have "/etc/wireguard/$IFACE.conf"))"
+[[ -n "$OUR_IFACE" && "$OUR_IFACE" != "$IFACE" ]] && plan "" "altes Interface $OUR_IFACE wird gestoppt und entfernt"
+plan "NAT/Forwarding" "$( [[ $NAT -eq 1 ]] && echo "PostUp/PostDown von $IFACE ($SUBNET → $WAN_IF), ip_forward=1" || echo "nein (--no-nat)")"
+plan "TLS-Zertifikat" "$CERT_WHY"
+plan "nginx-vhost" "/etc/nginx/sites-available/simple-wireguard ($(have /etc/nginx/sites-available/simple-wireguard)), Port $GUI_PORT/tcp"
+plan "Interner App-Port" "127.0.0.1:$APP_PORT"
+plan "systemd" "simple-wireguard(-agent).service ($(have /etc/systemd/system/simple-wireguard.service)), wg-quick@$IFACE"
+plan "Sonstiges" "/etc/logrotate.d/simple-wireguard, /usr/local/sbin/swg-admin"
+plan "Dienste" "enable + (re)start: simple-wireguard-agent, simple-wireguard, wg-quick@$IFACE; nginx reload"
+plan "Admin-Benutzer" "$( [[ -f "$VAR/swg.db" ]] && echo "Datenbank vorhanden – Benutzer bleiben" || echo "'$ADMIN_USER' anlegen (Passwort wird angezeigt)")"
+echo
+plan "NICHT angefasst" "Firewall (ufw/nftables/iptables-Persistenz), /etc/sysctl.d, andere nginx-Sites"
+[[ $FOREIGN -eq 1 ]] && plan "" "fremde WireGuard-Interfaces: $(printf '%s ' "${FOREIGN_LINES[@]%% *}")"
+# Informational only: port checks above use `ss` as root and therefore already see every listener of
+# every user (docker-proxy, host-network containers, rootless Docker).
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  host_net="$(docker ps --format '{{.Names}} {{.Networks}}' 2>/dev/null | awk '$2=="host"{print $1}' | xargs)"
+  plan "Docker" "$(docker ps -q 2>/dev/null | wc -l) Container laufen – werden nicht angefasst$( [[ -n "$host_net" ]] && echo "; im Host-Netz: $host_net")"
+fi
+hr
+
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "${G}${BOLD} Dry-Run beendet – es wurde nichts verändert.${N}"
+  echo " Zum Ausführen:  sudo bash install.sh ${ORIG_ARGS}--force"
+  hr
+  exit 0
+fi
+confirm "Plan jetzt ausführen?" y || { info "Abgebrochen – nichts verändert."; exit 1; }
+
+# ==========================================================================================
+#  APPLY
+# ==========================================================================================
+info "Installiere Pakete …"
+export DEBIAN_FRONTEND=noninteractive
 if [[ ${#missing[@]} -gt 0 ]]; then
   info "Fehlende Pakete: ${missing[*]}"
   apt-get update -qq
@@ -278,13 +398,6 @@ elif ! dpkg -s nginx >/dev/null 2>&1 || ! systemctl cat nginx >/dev/null 2>&1; t
   die "nginx-Paket ist in einem unerwarteten Zustand (dpkg -s nginx / systemctl status nginx prüfen)"
 fi
 ok "Pakete vorhanden"
-
-if [[ -z "$ENDPOINT" ]]; then
-  ENDPOINT="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
-  [[ -n "$ENDPOINT" ]] || ENDPOINT="$(ip -4 addr show "$WAN_IF" | grep -oP 'inet \K[0-9.]+' | head -1)"
-  info "Endpoint automatisch erkannt: $ENDPOINT (ändern mit --endpoint vpn.example.com)"
-fi
-[[ "$ENDPOINT" =~ ^[A-Za-z0-9.:-]+$ ]] || die "Ungültiger Endpoint: $ENDPOINT"
 
 # ---------- user & directories ----------
 id swg >/dev/null 2>&1 || useradd --system --home-dir "$VAR" --shell /usr/sbin/nologin swg
@@ -307,8 +420,7 @@ chown -R root:root "$ROOT/app" "$ROOT/web" "$ROOT/agent"
 install -m 0644 "$SCRIPT_DIR/VERSION" "$ROOT/VERSION"
 install -m 0755 "$SCRIPT_DIR/deploy/swg-admin" /usr/local/sbin/swg-admin
 
-REQ_HASH="$(sha256sum "$ROOT/app/requirements.txt" | cut -d' ' -f1)-$(python3 -c 'import sys;print(sys.version_info[:2])' | tr -d ' ')"
-if [[ ! -x "$ROOT/venv/bin/python" || "$(cat "$ROOT/venv/.req-hash" 2>/dev/null)" != "$REQ_HASH" ]]; then
+if [[ $VENV_REBUILD -eq 1 ]]; then
   info "Erzeuge Python-Umgebung (kann einen Moment dauern) …"
   rm -rf "$ROOT/venv"
   python3 -m venv "$ROOT/venv"
@@ -331,27 +443,7 @@ fi
 chown root:root "$ETC/server.key"; chmod 0600 "$ETC/server.key"
 SERVER_PUB="$(wg pubkey < "$ETC/server.key")"
 
-# NAT/forwarding scoped to our interface only (added on up, removed on down). Nothing persistent.
-NAT_RULES=""
-if [[ $NAT -eq 1 ]]; then
-  NAT_RULES="PostUp = sysctl -q -w net.ipv4.ip_forward=1
-PostUp = iptables -I FORWARD -i %i -j ACCEPT; iptables -I FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -s $SUBNET -o $WAN_IF -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -s $SUBNET -o $WAN_IF -j MASQUERADE"
-fi
-
-# ---------- interface header (root only; the web app can never change it) ----------
-NEW_IFACE_CONF="$(cat <<EOF
-# Managed by Simple-WireGuard install.sh. Peers are appended by the agent.
-[Interface]
-Address = $SERVER_ADDR/$PREFIX
-ListenPort = $PORT
-PrivateKey = $(cat "$ETC/server.key")
-SaveConfig = false
-$NAT_RULES
-EOF
-)"
+NEW_IFACE_CONF="$(build_iface_conf "$(cat "$ETC/server.key")")"
 IFACE_CHANGED=0
 if [[ ! -f "$ETC/interface.conf" ]] || [[ "$(cat "$ETC/interface.conf")" != "$NEW_IFACE_CONF" ]]; then
   ( umask 077; printf '%s\n' "$NEW_IFACE_CONF" > "$ETC/interface.conf" ); IFACE_CHANGED=1
@@ -375,27 +467,17 @@ chown root:swg "$SJ"; chmod 0640 "$SJ"
 
 
 # ---------- TLS certificate (self-signed unless provided) ----------
-CERT="$ETC/tls/cert.pem"; KEY="$ETC/tls/key.pem"
-if [[ -n "$OPT_CERT" || -n "$OPT_KEY" ]]; then
-  [[ -f "$OPT_CERT" && -f "$OPT_KEY" ]] || die "--cert und --key müssen existierende Dateien sein"
+if [[ $CERT_PLAN == custom ]]; then
   install -m 0644 "$OPT_CERT" "$CERT"; install -m 0600 "$OPT_KEY" "$KEY"
   echo "custom" > "$ETC/tls/.source"; ok "Eigenes Zertifikat übernommen"
-else
-  need_cert=$RENEW_CERT
-  [[ -f "$CERT" && -f "$KEY" ]] || need_cert=1
-  if [[ $need_cert -eq 0 && "$(cat "$ETC/tls/.source" 2>/dev/null)" != "custom" ]]; then
-    openssl x509 -in "$CERT" -noout -checkend $((30*86400)) >/dev/null 2>&1 || { info "Zertifikat läuft bald ab – erneuere"; need_cert=1; }
-    openssl x509 -in "$CERT" -noout -ext subjectAltName 2>/dev/null | grep -qF "$ENDPOINT" || { info "Endpoint geändert – erneuere Zertifikat"; need_cert=1; }
-  fi
-  if [[ $need_cert -eq 1 ]]; then
-    if [[ "$ENDPOINT" =~ ^[0-9.]+$ || "$ENDPOINT" == *:* ]]; then SAN="IP:$ENDPOINT"; else SAN="DNS:$ENDPOINT"; fi
-    SAN="$SAN,DNS:$(hostname -f 2>/dev/null || hostname),DNS:localhost,IP:127.0.0.1,IP:$SERVER_ADDR"
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -sha256 -days 825 \
-      -keyout "$KEY" -out "$CERT" -subj "/CN=$ENDPOINT/O=Simple-WireGuard" \
-      -addext "subjectAltName=$SAN" -addext "keyUsage=digitalSignature" -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
-    echo "self-signed" > "$ETC/tls/.source"
-    ok "Self-Signed-Zertifikat erzeugt (ECDSA P-256, 825 Tage, SAN: $SAN)"
-  fi
+elif [[ $CERT_PLAN == new ]]; then
+  if [[ "$ENDPOINT" =~ ^[0-9.]+$ || "$ENDPOINT" == *:* ]]; then SAN="IP:$ENDPOINT"; else SAN="DNS:$ENDPOINT"; fi
+  SAN="$SAN,DNS:$(hostname -f 2>/dev/null || hostname),DNS:localhost,IP:127.0.0.1,IP:$SERVER_ADDR"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -sha256 -days 825 \
+    -keyout "$KEY" -out "$CERT" -subj "/CN=$ENDPOINT/O=Simple-WireGuard" \
+    -addext "subjectAltName=$SAN" -addext "keyUsage=digitalSignature" -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
+  echo "self-signed" > "$ETC/tls/.source"
+  ok "Self-Signed-Zertifikat erzeugt (ECDSA P-256, 825 Tage, SAN: $SAN)"
 fi
 chmod 0644 "$CERT"; chmod 0600 "$KEY"; chown root:root "$CERT" "$KEY"
 CERT_FP="$(openssl x509 -in "$CERT" -noout -fingerprint -sha256 | cut -d= -f2)"

@@ -1,5 +1,5 @@
 // Caches only the static app shell. API responses are never cached (they hold secrets).
-const CACHE = 'swg-shell-v0.1.4';
+const CACHE = 'swg-shell-v0.2.0';
 const SHELL = ['/', '/index.html', '/css/app.css', '/js/app.js', '/manifest.webmanifest', '/icons/icon.svg'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(

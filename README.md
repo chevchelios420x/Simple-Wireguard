@@ -32,9 +32,12 @@ WireGuard-Server für Ubuntu mit einer Weboberfläche zum Verwalten von Peers. D
 ```bash
 git clone https://github.com/chevchelios420x/Simple-Wireguard.git
 cd Simple-Wireguard
-sudo bash install.sh                       # interaktiv, erkennt Endpoint automatisch
-sudo bash install.sh --endpoint vpn.example.com --port 51820 --subnet 10.8.0.0/24
+sudo bash install.sh                       # DRY-RUN: prüft alles, zeigt den Plan, ändert NICHTS
+sudo bash install.sh --force               # Plan wirklich ausführen
+sudo bash install.sh --endpoint vpn.example.com --port 51820 --subnet 10.8.0.0/24 --force
 ```
+
+**Standardmäßig läuft der Installer immer als Dry-Run.** Er führt alle Prüfungen durch und zeigt den vollständigen Plan: Pakete, Dateien, Schlüssel, Zertifikat, Interface, Ports und Dienste. Er installiert dabei kein Paket, schreibt keine Datei und legt auch kein Log an. Rückfragen werden im Dry-Run nur angezeigt. Erst mit `--force` wird der Plan nach einer letzten Bestätigung ausgeführt. Am Ende des Dry-Runs steht der passende Befehl zum Kopieren.
 
 Am Ende zeigt das Script die URL (Standard `https://<server>:4444`), den SHA256-Fingerprint des Zertifikats und **einmalig** das initiale Admin-Passwort. Beim ersten Login werden ein Passwortwechsel und die TOTP-Einrichtung erzwungen.
 
@@ -49,7 +52,8 @@ Am Ende zeigt das Script die URL (Standard `https://<server>:4444`), den SHA256-
 | `--cert/--key` | Self-Signed | eigenes TLS-Zertifikat |
 | `--renew-cert` | – | Self-Signed-Zertifikat neu erzeugen |
 | `--no-nat` | – | keine NAT/Forwarding-Regeln im Interface |
-| `--yes` | – | keine Rückfragen |
+| `--force` | – | **ausführen** (ohne: nur Dry-Run) |
+| `--yes` | – | keine Rückfragen (nur zusammen mit `--force` wirksam) |
 
 Das Script ist **idempotent**. Erneutes Ausführen aktualisiert die Anwendung oder übernimmt geänderte Optionen. Daten und Schlüssel bleiben dabei erhalten. Es unterscheidet klar zwischen einer eigenen Vorinstallation und fremden WireGuard-Konfigurationen und warnt bei aktiven Client-Verbindungen.
 

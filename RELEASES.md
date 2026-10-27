@@ -2,6 +2,22 @@
 
 Versionierung: `vX.Y.Z` – X = Major (nur auf Ansage), Y = neues Feature, Z = Bugfix.
 
+## v0.2.0 – 2026-10-27
+
+### Neu
+- **Installer läuft standardmäßig als Dry-Run.** Alle Prüfungen laufen, der vollständige Plan wird angezeigt
+  (Pakete, Dateien, Schlüssel, Zertifikat, Interface inkl. eventuellem Neustart, Ports, Dienste, was NICHT
+  angefasst wird), und es wird nichts verändert. Installiert wird erst mit `--force` nach einer letzten
+  Bestätigung (`--yes` überspringt sie). Der Dry-Run schreibt auch kein Log.
+- Der Plan zeigt laufende Docker-Container und Container im Host-Netz an (nur zur Information; die
+  Port-Prüfung per `ss` als root erfasst ohnehin alle Ports aller Benutzer).
+
+### Bugfixes
+- Installer: `. /etc/os-release` überschrieb die interne Variable `VERSION`. Banner und Installationsmarker
+  zeigten dadurch die Ubuntu-Version statt der Simple-WireGuard-Version, und die Update-Erkennung war
+  fehlerhaft. os-release wird jetzt in einer Subshell gelesen.
+- Installer: Prüft vorab, ob `ip`, `ss`, `python3` und `dpkg` vorhanden sind, und meldet ein fehlendes Paket klar.
+
 ## v0.1.4 – 2026-10-27
 
 ### Bugfixes
