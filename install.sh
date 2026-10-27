@@ -30,7 +30,7 @@ hr()    { echo "${BOLD}───────────────────
 trap 'err "Abbruch in Zeile $LINENO (Befehl: $BASH_COMMAND)"' ERR
 
 ASSUME_YES=0; RENEW_CERT=0; NAT=1
-OPT_ENDPOINT= OPT_PORT= OPT_SUBNET= OPT_DNS= OPT_IFACE= OPT_GUI_PORT= OPT_CERT= OPT_KEY=
+OPT_ENDPOINT= OPT_PORT= OPT_SUBNET= OPT_DNS= OPT_DNS_SET=0 OPT_IFACE= OPT_GUI_PORT= OPT_CERT= OPT_KEY=
 ADMIN_USER=admin
 
 usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     --endpoint) OPT_ENDPOINT="$2"; shift 2 ;;
     --port) OPT_PORT="$2"; shift 2 ;;
     --subnet) OPT_SUBNET="$2"; shift 2 ;;
-    --dns) OPT_DNS="$2"; shift 2 ;;
+    --dns) OPT_DNS="$2"; OPT_DNS_SET=1; shift 2 ;;
     --iface) OPT_IFACE="$2"; shift 2 ;;
     --gui-port) OPT_GUI_PORT="$2"; shift 2 ;;
     --admin) ADMIN_USER="$2"; shift 2 ;;
@@ -166,7 +166,10 @@ SJ="$ETC/server.json"
 prev() { [[ -f "$SJ" ]] && json_get "$SJ" "$1" || true; }
 PORT="${OPT_PORT:-$(prev listen_port)}"; PORT="${PORT:-51820}"
 SUBNET="${OPT_SUBNET:-$(prev subnet)}"; SUBNET="${SUBNET:-10.8.0.0/24}"
-DNS="${OPT_DNS:-$(prev dns)}"; DNS="${DNS:-1.1.1.1, 9.9.9.9}"
+# --dns "" is a valid choice (no DNS pushed to clients, e.g. for site-to-site links) and must be kept.
+if [[ $OPT_DNS_SET -eq 1 ]]; then DNS="$OPT_DNS"
+elif [[ -f "$SJ" ]]; then DNS="$(prev dns)"
+else DNS="1.1.1.1, 9.9.9.9"; fi
 PREV_GUI_PORT="$(prev gui_port)"
 GUI_PORT="${OPT_GUI_PORT:-$PREV_GUI_PORT}"; GUI_PORT="${GUI_PORT:-4444}"
 ENDPOINT="${OPT_ENDPOINT:-$(prev endpoint)}"

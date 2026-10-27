@@ -2,6 +2,12 @@
 
 Versionierung: `vX.Y.Z` – X = Major (nur auf Ansage), Y = neues Feature, Z = Bugfix.
 
+## v0.1.3 – 2026-10-27
+
+### Bugfixes
+- Installer: `--dns ""` (kein DNS für Clients, z. B. bei Site-to-Site-Verbindungen) fiel stillschweigend auf
+  `1.1.1.1, 9.9.9.9` zurück. Ein leerer Wert wird jetzt übernommen und bleibt auch bei erneutem Ausführen erhalten.
+
 ## v0.1.2 – 2026-10-27
 
 ### Bugfixes
