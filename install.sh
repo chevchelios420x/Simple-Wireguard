@@ -234,11 +234,29 @@ WAN_IF="$(ip -4 route show default | awk '{for(i=1;i<=NF;i++) if($i=="dev"){prin
 # ---------- packages ----------
 info "Installiere Pakete …"
 export DEBIAN_FRONTEND=noninteractive
-PKGS=(wireguard wireguard-tools nginx python3 python3-venv openssl iptables logrotate curl ca-certificates)
+PKGS=(wireguard wireguard-tools nginx python3 python3-venv openssl logrotate curl ca-certificates)
+[[ $NAT -eq 1 ]] && PKGS+=(iptables)
 missing=(); for p in "${PKGS[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+NGINX_FRESH=0
+[[ " ${missing[*]} " == *" nginx "* ]] && NGINX_FRESH=1
 if [[ ${#missing[@]} -gt 0 ]]; then
+  info "Fehlende Pakete: ${missing[*]}"
   apt-get update -qq
-  apt-get install -y -qq "${missing[@]}" >/dev/null
+  # Do not let freshly installed services auto-start: a stock nginx would grab port 80 with its
+  # default site (and fail the apt run if port 80 is already used, e.g. by a Docker proxy/WAF).
+  had_policy=0; [[ -e /usr/sbin/policy-rc.d ]] && had_policy=1
+  if [[ $had_policy -eq 0 ]]; then printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod 0755 /usr/sbin/policy-rc.d; fi
+  apt_rc=0; apt-get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null || apt_rc=$?
+  [[ $had_policy -eq 0 ]] && rm -f /usr/sbin/policy-rc.d
+  [[ $apt_rc -eq 0 ]] || die "Paketinstallation fehlgeschlagen (apt-get exit $apt_rc)"
+fi
+if [[ $NGINX_FRESH -eq 1 ]]; then
+  # nginx was installed by us just now: its stock default site was not there before -> remove it again,
+  # so nginx only serves the Simple-WireGuard vhost and never touches port 80.
+  rm -f /etc/nginx/sites-enabled/default
+  info "nginx neu installiert – Standardseite (Port 80) deaktiviert, nur der GUI-Port wird genutzt"
+elif ! dpkg -s nginx >/dev/null 2>&1 || ! systemctl cat nginx >/dev/null 2>&1; then
+  die "nginx-Paket ist in einem unerwarteten Zustand (dpkg -s nginx / systemctl status nginx prüfen)"
 fi
 ok "Pakete vorhanden"
 
@@ -402,6 +420,7 @@ p = sys.argv[1]
 old = json.load(open(p)) if os.path.exists(p) else {}
 json.dump({"product": "simple-wireguard", "version": "$VERSION", "iface": "$IFACE",
            "installed_at": old.get("installed_at", "$NOW"), "updated_at": "$NOW",
+           "nginx_installed_by_us": bool(old.get("nginx_installed_by_us")) or $( [[ $NGINX_FRESH -eq 1 ]] && echo True || echo False ),
            "history": (old.get("history", []) + ["$VERSION@$NOW"])[-20:]}, open(p, "w"), indent=2)
 PY
 chmod 0644 "$MARKER"

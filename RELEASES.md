@@ -2,6 +2,16 @@
 
 Versionierung: `vX.Y.Z` – X = Major (nur auf Ansage), Y = neues Feature, Z = Bugfix.
 
+## v0.1.2 – 2026-10-27
+
+### Bugfixes
+- Installer: Ein frisch installiertes nginx-Paket startet nicht mehr automatisch mit der Standardseite auf
+  Port 80. Ist Port 80 schon belegt (z. B. durch einen Docker-Proxy oder eine WAF), brach `apt` vorher ab.
+  Die Standardseite wird nur entfernt, wenn nginx gerade durch das Script installiert wurde.
+- Installer: `iptables` wird mit `--no-nat` nicht mehr installiert.
+- Installer: Fehler der Paketinstallation werden jetzt klar gemeldet.
+- `uninstall.sh --purge` weist darauf hin, wenn nginx nur für Simple-WireGuard installiert wurde.
+
 ## v0.1.1 – 2026-10-25
 
 ### Dokumentation
